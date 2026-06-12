@@ -430,8 +430,6 @@ const WORKER_URL = 'https://lovely-recipe-fixer.jnward84.workers.dev';
 
 const VOLUME_TO_ML = {
   cup: 240, cups: 240,
-  tbsp: 15, tablespoon: 15, tablespoons: 15,
-  tsp: 5, teaspoon: 5, teaspoons: 5,
   'fl oz': 30, 'fluid ounce': 30, 'fluid ounces': 30,
   quart: 946, quarts: 946,
   pint: 473, pints: 473,
@@ -558,10 +556,29 @@ function formatAmount(amount) {
   return String(amount);
 }
 
-function convertTemperatures(text) {
-  return text.replace(/(\d{2,3})\s*°?\s*F\b/g, (_, f) => {
+function convertStepText(text) {
+  // Temperatures: 350°F → 175°C
+  text = text.replace(/(\d{2,3})\s*°?\s*F\b/g, (_, f) => {
     return Math.round((+f - 32) * 5 / 9) + '°C';
   });
+  // Cups → ml (in prose, default to liquid)
+  text = text.replace(/([\d\/½¼¾⅓⅔]+)\s*cups?\b/gi, (_, amt) => {
+    const n = parseAmount(amt);
+    return n ? roundNice(n * 240) + ' ml' : _;
+  });
+  // Oz/ounces → g
+  text = text.replace(/([\d\/½¼¾⅓⅔.]+)\s*(?:oz|ounces?)\b/gi, (_, amt) => {
+    const n = parseAmount(amt);
+    return n ? roundNice(n * 28.35) + ' g' : _;
+  });
+  // Lb/pounds → g or kg
+  text = text.replace(/([\d\/½¼¾⅓⅔.]+)\s*(?:lbs?|pounds?)\b/gi, (_, amt) => {
+    const n = parseAmount(amt);
+    if (!n) return _;
+    const g = n * 453.6;
+    return g >= 1000 ? roundNice(g / 1000) + ' kg' : roundNice(g) + ' g';
+  });
+  return text;
 }
 
 function formatDuration(iso) {
@@ -668,8 +685,9 @@ function renderRecipe(recipe) {
   const cook = formatDuration(recipe.cookTime);
   const total = formatDuration(recipe.totalTime);
 
-  const imageHtml = recipe.image
-    ? `<img class="recipe-image" src="${escapeAttr(recipe.image)}" alt="" onerror="this.style.display='none'">`
+  const imageUrl = recipe.image ? recipe.image.replace(/^http:\/\//i, 'https://') : null;
+  const imageHtml = imageUrl
+    ? `<img class="recipe-image" src="${escapeAttr(imageUrl)}" alt="" onerror="this.style.display='none'">`
     : '';
 
   const descHtml = recipe.description
@@ -681,7 +699,7 @@ function renderRecipe(recipe) {
   if (cook) metaItems.push(metaItem(flameIcon, 'Cook', cook));
   if (!prep && !cook && total) metaItems.push(metaItem(clockIcon, 'Total', total));
 
-  const steps = (recipe.steps || []).map(s => convertTemperatures(s));
+  const steps = (recipe.steps || []).map(s => convertStepText(s));
 
   $result.innerHTML = `
     <div class="recipe-card">
