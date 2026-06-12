@@ -403,7 +403,7 @@
     <line x1="28" y1="27" x2="28" y2="42" stroke="#6B7F5E" stroke-width="1.5" stroke-linecap="round"/>
   </svg>
   <h1>Recipe Cleaner</h1>
-  <p class="subtitle">Paste a recipe webpage address and get a clean version with metric units — simple, easy and rather lovely.</p>
+  <p class="subtitle">Paste a recipe web address and get a clean version in metric: no ads, no life stories, rather lovely really</p>
   <div class="input-group">
     <input type="url" id="urlInput" placeholder="https://www.example.com/recipe/..." autofocus>
     <button class="btn-clean" id="btnClean">Clean it up</button>
@@ -424,7 +424,7 @@
 // ============================================================
 // CONFIG — Replace this URL with your Cloudflare Worker URL
 // ============================================================
-const WORKER_URL = 'https://lovely-recipe-fixer.jnward84.workers.dev/';
+const WORKER_URL = 'https://lovely-recipe-fixer.jnward84.workers.dev';
 
 // --- Unit conversion ---
 
@@ -613,8 +613,25 @@ async function handleClean() {
     });
 
     const data = await res.json();
+    console.log('Worker response:', data);
 
-    if (!data.success) throw new Error(data.error || 'Extraction failed');
+    if (!data.success) {
+      const debugStr = data.debug ? JSON.stringify(data.debug, null, 2) : 'no debug info';
+      $result.innerHTML = `
+        <div class="recipe-card">
+          <div class="error-message">
+            <p>Couldn't extract a recipe from that page.</p>
+            <p style="margin-top:0.5rem;font-size:0.85rem;color:#B0ACA5">${escapeHtml(data.error || 'Unknown error')}</p>
+            <details style="margin-top:1rem;text-align:left;font-size:0.75rem;color:#999">
+              <summary>Debug info</summary>
+              <pre style="white-space:pre-wrap;word-break:break-all;margin-top:0.5rem">${escapeHtml(debugStr)}</pre>
+            </details>
+            <button onclick="resetApp()">Try another</button>
+          </div>
+        </div>`;
+      show($result);
+      return;
+    }
 
     if (data.source === 'llm') {
       $loadingText.textContent = 'Reading page with AI…';
