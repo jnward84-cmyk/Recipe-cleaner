@@ -452,11 +452,48 @@
   /* Print */
   @media print {
     body { background: #fff; }
-    .screen-input, .screen-loading, .card-actions, .hint { display: none !important; }
+    .screen-input, .screen-loading, .card-actions, .hint, .bookmarklet-setup { display: none !important; }
     .screen-result { padding: 0; }
     .recipe-card { box-shadow: none; border-radius: 0; }
     .recipe-image { height: 180px; }
     .check-circle { border-color: #ccc; }
+  }
+
+  /* Tips */
+  .tips-section {
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--border);
+    margin-top: 0.5rem;
+    animation: fadeIn 0.4s ease;
+  }
+
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  .tips-section .section-title {
+    font-size: 1.05rem;
+    margin-bottom: 0.6rem;
+    color: var(--sage-dark);
+  }
+
+  .tips-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .tips-list li {
+    position: relative;
+    padding: 0.45rem 0 0.45rem 1.4rem;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+
+  .tips-list li::before {
+    content: '💡';
+    position: absolute;
+    left: 0;
+    font-size: 0.75rem;
   }
 
   @media (max-width: 480px) {
@@ -490,9 +527,10 @@
     <button class="btn-toggle-setup" id="btnToggleSetup">Or use the bookmarklet for tricky sites</button>
     <div class="setup-panel hidden" id="setupPanel">
       <p class="setup-text">Some recipe sites block direct access. The bookmarklet works from <em>inside</em> the page you're already reading — no blocking possible.</p>
-      <p class="setup-text" style="margin-top:0.75rem"><strong>Desktop:</strong> drag this link to your bookmarks bar:</p>
+      <p class="setup-text" style="margin-top:0.75rem"><strong>How it works:</strong> open any recipe page, tap <em>📌 Clean Recipe</em> in your bookmarks, and a clean version opens automatically.</p>
+      <p class="setup-text" style="margin-top:0.75rem"><strong>One-time setup — Desktop:</strong> drag this link to your bookmarks bar:</p>
       <p style="margin:0.5rem 0"><a class="bookmarklet-drag" id="bookmarkletLink" href="#">📌 Clean Recipe</a></p>
-      <p class="setup-text" style="margin-top:0.75rem"><strong>iPhone/iPad:</strong></p>
+      <p class="setup-text" style="margin-top:0.75rem"><strong>One-time setup — iPhone/iPad:</strong></p>
       <ol class="setup-steps">
         <li>Bookmark this page (tap Share → Add Bookmark → Save)</li>
         <li>Open Bookmarks, find it, tap Edit</li>
@@ -656,6 +694,20 @@ function convertStepText(text) {
   text = text.replace(/(\d{2,3})\s*°?\s*F\b/g, (_, f) => {
     return Math.round((+f - 32) * 5 / 9) + '°C';
   });
+  // Dimensions: 9x13 inch → 23×33 cm
+  text = text.replace(/([\d.]+)\s*[x×]\s*([\d.]+)\s*[-\s]?(?:inch|in)\b\.?/gi, (_, a, b) => {
+    return Math.round(+a * 2.54) + '×' + Math.round(+b * 2.54) + ' cm';
+  });
+  // Inches → cm
+  text = text.replace(/([\d.\/½¼¾⅓⅔]+)\s*[-\s]?(?:inch|inches|in)\b\.?/gi, (_, amt) => {
+    const n = parseAmount(amt);
+    return n ? Math.round(n * 2.54) + ' cm' : _;
+  });
+  // Feet → cm
+  text = text.replace(/([\d.\/½¼¾]+)\s*(?:feet|foot|ft)\b\.?/gi, (_, amt) => {
+    const n = parseAmount(amt);
+    return n ? Math.round(n * 30.48) + ' cm' : _;
+  });
   // Cups → ml (in prose, default to liquid)
   text = text.replace(/([\d\/½¼¾⅓⅔]+)\s*cups?\b/gi, (_, amt) => {
     const n = parseAmount(amt);
@@ -766,7 +818,7 @@ $urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') handleClean(
       ingredients: recipe.recipeIngredient || [],
       steps: ldSteps(recipe.recipeInstructions),
     };
-    setTimeout(() => { renderRecipe(r); show($result); }, 100);
+    setTimeout(() => { r._pageText = data.text; renderRecipe(r); show($result); }, 100);
   } else if (data.text) {
     // LLM fallback — send text to worker
     show($loading);
@@ -780,6 +832,7 @@ $urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') handleClean(
     .then(result => {
       console.log('Worker response:', result);
       if (!result.success) throw new Error(result.error || 'Extraction failed');
+      result.recipe._pageText = data.text;
       renderRecipe(result.recipe);
       show($result);
     })
@@ -830,11 +883,23 @@ function ldSteps(instructions) {
   if (!instructions) return [];
   if (typeof instructions === 'string') return [instructions];
   if (!Array.isArray(instructions)) return [instructions.text || ''];
-  return instructions.flatMap(s => {
+  const raw = instructions.flatMap(s => {
     if (typeof s === 'string') return [s];
     if (s['@type'] === 'HowToSection') return ldSteps(s.itemListElement);
-    return [s.text || ''];
+    if (s.name && s.text && s.name !== s.text) return [s.name + ' ' + s.text];
+    return [s.text || s.name || ''];
   }).filter(Boolean);
+  const result = [];
+  for (let i = 0; i < raw.length; i++) {
+    const step = raw[i].trim();
+    if (step.length < 60 && step.endsWith(':') && i + 1 < raw.length) {
+      result.push(step + ' ' + raw[i + 1].trim());
+      i++;
+    } else {
+      result.push(step);
+    }
+  }
+  return result;
 }
 
 async function handleClean() {
@@ -878,6 +943,7 @@ async function handleClean() {
       await sleep(300);
     }
 
+    if (data.pageText) data.recipe._pageText = data.pageText;
     renderRecipe(data.recipe);
     show($result);
 
@@ -960,6 +1026,8 @@ function renderRecipe(recipe) {
           <button class="btn-action" onclick="window.print()">Print</button>
           <button class="btn-action" onclick="resetApp()">Clean another</button>
         </div>
+
+        <div id="tipsContainer"></div>
       </div>
     </div>`;
 
@@ -972,6 +1040,33 @@ function renderRecipe(recipe) {
     const li = e.target.closest('li');
     if (li) li.classList.toggle('checked');
   });
+
+  // Async tips loading — if page text is available
+  if (recipe._pageText) {
+    fetchTips(recipe._pageText, recipe.steps || [], recipe.ingredients || []);
+  }
+}
+
+function fetchTips(pageText, steps, ingredients) {
+  fetch(WORKER_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tips: true, text: pageText, recipeSteps: steps, recipeIngredients: ingredients }),
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (!data.success || !data.tips || !data.tips.length) return;
+    const container = document.getElementById('tipsContainer');
+    if (!container) return;
+    container.innerHTML = `
+      <div class="tips-section">
+        <h3 class="section-title">Tips from the original</h3>
+        <ul class="tips-list">
+          ${data.tips.map(t => `<li>${escapeHtml(t)}</li>`).join('')}
+        </ul>
+      </div>`;
+  })
+  .catch(() => {}); // Silent fail — tips are a bonus
 }
 
 function renderIngredients() {
@@ -986,7 +1081,7 @@ function renderIngredients() {
     }
     return `<li>
       <span class="check-circle"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6l2.5 2.5 4.5-5" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-      <span class="ingredient-text">${escapeHtml(ing.raw)}</span>
+      <span class="ingredient-text">${escapeHtml(convertStepText(ing.raw))}</span>
     </li>`;
   }).join('');
 }
