@@ -604,6 +604,8 @@ const CUP_GRAMS = {
 function parseAmount(str) {
   if (!str) return null;
   str = str.trim()
+    // Separate digit from adjacent unicode fraction: "2½" → "2 ½"
+    .replace(/([\d.])([⅛¼⅓⅜½⅝⅔¾⅞])/g, '$1 $2')
     .replace(/⅛/g, '0.125').replace(/¼/g, '0.25').replace(/⅓/g, '0.333')
     .replace(/⅜/g, '0.375').replace(/½/g, '0.5').replace(/⅝/g, '0.625')
     .replace(/⅔/g, '0.667').replace(/¾/g, '0.75').replace(/⅞/g, '0.875');
@@ -690,16 +692,24 @@ function formatAmount(amount) {
 }
 
 function convertStepText(text) {
-  // Temperatures: 350°F → 175°C
+  // Temperatures with Celsius already provided: "350°F (175°C)" → "175°C"
+  text = text.replace(/\d{2,3}\s*°?\s*F\s*\(\s*(\d{2,3})\s*°?\s*C\s*\)/g, '$1°C');
+  text = text.replace(/\d{2,3}\s*°?\s*F\s*\/\s*(\d{2,3})\s*°?\s*C/g, '$1°C');
+  // Standalone temperatures: 350°F → 175°C
   text = text.replace(/(\d{2,3})\s*°?\s*F\b/g, (_, f) => {
     return Math.round((+f - 32) * 5 / 9) + '°C';
   });
-  // Dimensions: 9x13 inch → 23×33 cm
-  text = text.replace(/([\d.]+)\s*[x×]\s*([\d.]+)\s*[-\s]?(?:inch|in)\b\.?/gi, (_, a, b) => {
-    return Math.round(+a * 2.54) + '×' + Math.round(+b * 2.54) + ' cm';
+  // Multi-dimensional inches: "8½ x 4½ x 2½ inches" → "22 × 11 × 6 cm"
+  text = text.replace(/([\d\s\/½¼¾⅓⅔.]+(?:\s*[x×]\s*[\d\s\/½¼¾⅓⅔.]+)+)\s*[-\s]?(?:inches|inch|in)\b\.?/gi, (_, dims) => {
+    const parts = dims.split(/\s*[x×]\s*/);
+    const converted = parts.map(p => {
+      const n = parseAmount(p.trim());
+      return n ? Math.round(n * 2.54) : p.trim();
+    });
+    return converted.join('×') + ' cm';
   });
-  // Inches → cm
-  text = text.replace(/([\d.\/½¼¾⅓⅔]+)\s*[-\s]?(?:inch|inches|in)\b\.?/gi, (_, amt) => {
+  // Single inches → cm
+  text = text.replace(/([\d.\/½¼¾⅓⅔]+)\s*[-\s]?(?:inches|inch|in)\b\.?/gi, (_, amt) => {
     const n = parseAmount(amt);
     return n ? Math.round(n * 2.54) + ' cm' : _;
   });
@@ -964,6 +974,12 @@ function renderRecipe(recipe) {
   baseServings = recipe.servings || 4;
   currentServings = baseServings;
 
+  // Decode HTML entities (JSON-LD often contains &nbsp; etc.)
+  recipe.title = decodeHtml(recipe.title);
+  recipe.description = decodeHtml(recipe.description);
+  recipe.ingredients = (recipe.ingredients || []).map(decodeHtml);
+  recipe.steps = (recipe.steps || []).map(decodeHtml);
+
   // Parse and convert ingredients
   baseIngredients = (recipe.ingredients || []).map(raw => {
     const parsed = parseIngredient(raw);
@@ -1108,6 +1124,13 @@ function escapeHtml(s) {
   const div = document.createElement('div');
   div.textContent = s;
   return div.innerHTML;
+}
+
+function decodeHtml(s) {
+  if (!s || typeof s !== 'string') return s;
+  const div = document.createElement('div');
+  div.innerHTML = s;
+  return div.textContent;
 }
 
 function escapeAttr(s) {
