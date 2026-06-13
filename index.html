@@ -114,6 +114,83 @@
     color: #B0ACA5;
   }
 
+  .bookmarklet-setup {
+    margin-top: 1.75rem;
+    width: 100%;
+    max-width: 520px;
+  }
+
+  .btn-toggle-setup {
+    background: none;
+    border: none;
+    color: var(--sage);
+    font-family: var(--font-body);
+    font-size: 0.85rem;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .setup-panel { margin-top: 1rem; text-align: left; }
+  .setup-panel.hidden { display: none; }
+
+  .setup-text { font-size: 0.85rem; color: var(--text-secondary); line-height: 1.5; }
+
+  .setup-steps {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    padding-left: 1.25rem;
+    margin: 0.4rem 0 0.75rem;
+    line-height: 1.6;
+  }
+
+  .bookmarklet-drag {
+    display: inline-block;
+    padding: 0.4rem 1rem;
+    background: var(--sage-light);
+    color: var(--sage-dark);
+    border-radius: 6px;
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: grab;
+  }
+
+  .code-copy-wrap {
+    position: relative;
+    margin-top: 0.25rem;
+    background: #2D2926;
+    border-radius: 8px;
+    padding: 0.75rem;
+    padding-right: 4rem;
+    overflow: hidden;
+  }
+
+  .bookmarklet-code {
+    display: block;
+    font-size: 0.7rem;
+    color: #B0ACA5;
+    word-break: break-all;
+    white-space: pre-wrap;
+    max-height: 4rem;
+    overflow: auto;
+    line-height: 1.4;
+  }
+
+  .btn-copy {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    padding: 0.3rem 0.7rem;
+    background: var(--sage);
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    font-family: var(--font-body);
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+
   /* --- LOADING --- */
 
   .screen-loading {
@@ -409,6 +486,24 @@
     <button class="btn-clean" id="btnClean">Clean it up</button>
   </div>
   <p class="hint">Works with most recipe websites. For Pinterest, use the link to the original recipe.</p>
+  <div class="bookmarklet-setup" id="bookmarkletSetup">
+    <button class="btn-toggle-setup" id="btnToggleSetup">Or use the bookmarklet for tricky sites</button>
+    <div class="setup-panel hidden" id="setupPanel">
+      <p class="setup-text">Some recipe sites block direct access. The bookmarklet works from <em>inside</em> the page you're already reading — no blocking possible.</p>
+      <p class="setup-text" style="margin-top:0.75rem"><strong>Desktop:</strong> drag this link to your bookmarks bar:</p>
+      <p style="margin:0.5rem 0"><a class="bookmarklet-drag" id="bookmarkletLink" href="#">📌 Clean Recipe</a></p>
+      <p class="setup-text" style="margin-top:0.75rem"><strong>iPhone/iPad:</strong></p>
+      <ol class="setup-steps">
+        <li>Bookmark this page (tap Share → Add Bookmark → Save)</li>
+        <li>Open Bookmarks, find it, tap Edit</li>
+        <li>Replace the URL with the code below, then Save</li>
+      </ol>
+      <div class="code-copy-wrap">
+        <code class="bookmarklet-code" id="bookmarkletCode"></code>
+        <button class="btn-copy" id="btnCopy">Copy</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- LOADING -->
@@ -613,6 +708,134 @@ function show(screen) {
 
 $btnClean.addEventListener('click', handleClean);
 $urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') handleClean(); });
+
+// --- Bookmarklet setup ---
+
+(function setupBookmarklet() {
+  const pageUrl = location.origin + location.pathname;
+  const bmCode = `javascript:void(function(){var d={ld:[],img:null,url:location.href,title:document.title,text:''};var s=document.querySelectorAll('script[type="application/ld+json"]');for(var i=0;i<s.length;i++){try{d.ld.push(JSON.parse(s[i].textContent))}catch(e){}}var m=document.querySelector('meta[property="og:image"]');if(m)d.img=m.getAttribute('content');var el=document.querySelector('main,article,.post-content,.entry-content,[role="main"]');d.text=(el||document.body).innerText.substring(0,15000);window.open('${pageUrl}#bm='+encodeURIComponent(JSON.stringify(d)))}())`;
+
+  document.getElementById('bookmarkletLink').href = bmCode;
+  document.getElementById('bookmarkletCode').textContent = bmCode;
+
+  document.getElementById('btnToggleSetup').addEventListener('click', () => {
+    document.getElementById('setupPanel').classList.toggle('hidden');
+  });
+
+  document.getElementById('btnCopy').addEventListener('click', () => {
+    navigator.clipboard.writeText(bmCode).then(() => {
+      const btn = document.getElementById('btnCopy');
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = 'Copy', 2000);
+    });
+  });
+})();
+
+// --- Bookmarklet handler ---
+
+(function handleBookmarklet() {
+  if (!location.hash.startsWith('#bm=')) return;
+  const raw = decodeURIComponent(location.hash.substring(4));
+  history.replaceState(null, '', location.pathname); // clean up URL
+
+  let data;
+  try { data = JSON.parse(raw); } catch(e) { return; }
+
+  // Try client-side JSON-LD extraction (free, instant)
+  let recipe = null;
+  if (data.ld && data.ld.length) {
+    for (const item of data.ld) {
+      recipe = findRecipeInLd(item);
+      if (recipe) break;
+    }
+  }
+
+  if (recipe) {
+    // Direct render — no API call
+    show($loading);
+    $loadingText.textContent = 'Cleaning recipe…';
+    const img = ldImage(recipe.image) || data.img;
+    const r = {
+      title: recipe.name || data.title || 'Recipe',
+      description: recipe.description || null,
+      image: img,
+      prepTime: recipe.prepTime || null,
+      cookTime: recipe.cookTime || null,
+      totalTime: recipe.totalTime || null,
+      servings: ldServings(recipe.recipeYield),
+      ingredients: recipe.recipeIngredient || [],
+      steps: ldSteps(recipe.recipeInstructions),
+    };
+    setTimeout(() => { renderRecipe(r); show($result); }, 100);
+  } else if (data.text) {
+    // LLM fallback — send text to worker
+    show($loading);
+    $loadingText.textContent = 'Reading recipe with AI…';
+    fetch(WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: data.text, title: data.title, image: data.img }),
+    })
+    .then(r => r.json())
+    .then(result => {
+      console.log('Worker response:', result);
+      if (!result.success) throw new Error(result.error || 'Extraction failed');
+      renderRecipe(result.recipe);
+      show($result);
+    })
+    .catch(err => {
+      $result.innerHTML = `
+        <div class="recipe-card"><div class="error-message">
+          <p>Couldn't extract a recipe from that page.</p>
+          <p style="margin-top:0.5rem;font-size:0.85rem;color:#B0ACA5">${escapeHtml(err.message)}</p>
+          <button onclick="resetApp()">Try another</button>
+        </div></div>`;
+      show($result);
+    });
+  }
+})();
+
+// JSON-LD helpers for client-side extraction
+function findRecipeInLd(data) {
+  if (!data) return null;
+  if (data['@graph']) return findRecipeInLd(data['@graph']);
+  if (Array.isArray(data)) {
+    for (const item of data) {
+      const found = findRecipeInLd(item);
+      if (found) return found;
+    }
+    return null;
+  }
+  const types = Array.isArray(data['@type']) ? data['@type'] : [data['@type']];
+  if (types.includes('Recipe')) return data;
+  return null;
+}
+
+function ldImage(img) {
+  if (!img) return null;
+  if (typeof img === 'string') return img;
+  if (Array.isArray(img)) return ldImage(img[0]);
+  return img.url || img.contentUrl || null;
+}
+
+function ldServings(y) {
+  if (!y) return 4;
+  if (typeof y === 'number') return y;
+  if (Array.isArray(y)) y = y[0];
+  const n = parseInt(String(y).match(/\d+/)?.[0]);
+  return n || 4;
+}
+
+function ldSteps(instructions) {
+  if (!instructions) return [];
+  if (typeof instructions === 'string') return [instructions];
+  if (!Array.isArray(instructions)) return [instructions.text || ''];
+  return instructions.flatMap(s => {
+    if (typeof s === 'string') return [s];
+    if (s['@type'] === 'HowToSection') return ldSteps(s.itemListElement);
+    return [s.text || ''];
+  }).filter(Boolean);
+}
 
 async function handleClean() {
   let url = $urlInput.value.trim();
