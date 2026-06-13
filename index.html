@@ -1077,7 +1077,7 @@ function fetchTips(pageText, steps, ingredients) {
     if (!container) return;
     container.innerHTML = `
       <div class="tips-section">
-        <h3 class="section-title">Tips from the original</h3>
+        <h3 class="section-title">Tips</h3>
         <ul class="tips-list">
           ${data.tips.map(t => `<li>${escapeHtml(t)}</li>`).join('')}
         </ul>
